@@ -90,8 +90,21 @@ class Player(
     private var _lastOpenedPath : String? = null
     private var audioMetas: AudioMetas? = null
     private var notificationSettings: NotificationSettings? = null
-
+    private var playerWithDuration: PlayerFinder.PlayerWithDuration? = null
+    private var crossFading = false
     private var _lastPositionMs: Long? = null
+    private var crossFade: Boolean = false
+    private val fadeHandler: Handler = Handler()
+    private var updater: Runnable = Runnable {
+        run {
+            if(fadeVolume >= 1f){
+                fadeHandler.removeCallbacksAndMessages(updater);
+            }
+            fadeInStep(0.05F)
+            fadeHandler.postDelayed(updater,250);
+        }
+    }
+
     private val updatePosition = object : Runnable {
         override fun run() {
             mediaPlayer?.let { mediaPlayer ->
@@ -104,6 +117,13 @@ class Player(
 
                     if(_lastPositionMs != positionMs) {
                         // Send position (milliseconds) to the application.
+                        if(crossFade){
+                            if(positionMs + 5000 >= _durationMs && !crossFading){
+                                onFinished?.invoke()
+                                crossFading = true
+                                return
+                            }
+                        }
                         onPositionMSChanged?.invoke(positionMs)
                         _lastPositionMs = positionMs
                     }
@@ -147,6 +167,13 @@ class Player(
         }
     }
 
+    var fadeVolume = 0f
+
+    private fun fadeInStep(deltaVolume: Float)  {
+        mediaPlayer?.setVolume(fadeVolume)
+        fadeVolume += deltaVolume
+    }
+
     fun open(assetAudioPath: String?,
              assetAudioPackage: String?,
              audioType: String,
@@ -164,7 +191,8 @@ class Player(
              networkHeaders: Map<*, *>?,
              result: MethodChannel.Result,
              context: Context,
-             drmConfiguration: Map<*, *>?
+             drmConfiguration: Map<*, *>?,
+             crossFadeValue: Boolean = true
     ) {
         try {
             stop(pingListener = false)
@@ -193,7 +221,9 @@ class Player(
                         context = context,
                         onFinished = {
                             stopWhenCall.stop()
-                            onFinished?.invoke()
+                            if (!crossFadeValue) {
+                                onFinished?.invoke()
+                            }
                         },
                         onPlaying = onPlaying,
                         onBuffering = onBuffering,
@@ -211,6 +241,8 @@ class Player(
                     onSessionIdFound?.invoke(it)
                 })
 
+                crossFading = false
+                crossFade = crossFadeValue
                 _playingPath = assetAudioPath
                 _durationMs = durationMs
 
@@ -221,12 +253,19 @@ class Player(
                 seek?.let {
                     this@Player.seek(milliseconds = seek * 1L)
                 }
-
+                setVolume(0.0)
+                fadeVolume = 0f
                 if (autoStart) {
                     play() //display notif inside
                 } else {
                     updateNotif() //if pause, we need to display the notif
                 }
+                if(crossFade){
+                    fadeHandler.post(updater)
+                } else {
+                    setVolume(1.0)
+                }
+
                 result.success(null)
             } catch (error: Throwable) {
                 error.printStackTrace()
@@ -242,14 +281,14 @@ class Player(
         }
     }
 
-    fun stop(pingListener: Boolean = true, removeNotification: Boolean = true) {
+    fun stop(pingListener: Boolean = true, removeNotification: Boolean = true, crossFade: Boolean = false) {
         mediaPlayer?.apply {
             // Reset duration and position.
             // handler.removeCallbacks(updatePosition);
             // channel.invokeMethod("player.duration", 0);
             onPositionMSChanged?.invoke(0)
 
-            mediaPlayer?.stop()
+            mediaPlayer?.stop(crossFade = crossFade)
             mediaPlayer?.release()
             onPlaying?.invoke(false)
             handler.removeCallbacks(updatePosition)
