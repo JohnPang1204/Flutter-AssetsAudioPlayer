@@ -1642,7 +1642,7 @@ class AssetsAudioPlayer {
 
 class _CurrentPlaylist {
   final Playlist playlist;
-
+final Random _random = Random();
   final double? volume;
   final bool? respectSilentMode;
   final bool? showNotification;
@@ -1667,7 +1667,7 @@ class _CurrentPlaylist {
   }
 
   int previousIndex() {
-    int index = playlistIndex;
+    var index = playlistIndex;
     if (index == 0) {
       return indexList.last;
     } else {
@@ -1685,11 +1685,6 @@ class _CurrentPlaylist {
 
   List<int> indexList = [];
 
-  void sortAudios() {
-    for (var i = 0; i < playlist.audios.length; i++) {
-      indexList.add(i);
-    }
-  }
 
   void clearPlayerAudio(bool shuffle) {
     var prevIndexList = [];
@@ -1697,23 +1692,30 @@ class _CurrentPlaylist {
     indexList.clear();
     if (shuffle) {
       indexList.add(shuffledIndex);
-      shuffleAudios();
+      _shuffleAudios();
     } else {
-      sortAudios();
+      _sortAudios();
+    }
+  }
+
+  void _sortAudios() {
+    for (var i = 0; i < playlist.audios.length; i++) {
+      indexList.add(i);
     }
   }
 
 
-  void shuffleAudios() {
-    for (var i = 0; i < playlist.audios.length; i++) {
-      final index = _shuffleNumbers();
+   void _shuffleAudios() {
+    for (var i = 0; i < playlist.audios.length - 1; i++) {
+      int index;
+      index = _shuffleNumbers();
       indexList.add(index);
     }
   }
 
-  int _shuffleNumbers() {
-    final random = Random();
-    var index = random.nextInt(playlist.audios.length);
+
+int _shuffleNumbers() {
+    var index = _random.nextInt(playlist.audios.length);
     if (indexList.contains(index)) {
       index = _shuffleNumbers();
     }
@@ -1745,7 +1747,7 @@ class _CurrentPlaylist {
   }
 
   bool hasNext() {
-    int index = playlistIndex;
+    var index = playlistIndex;
     return index + 1 < indexList.length;
   }
 
