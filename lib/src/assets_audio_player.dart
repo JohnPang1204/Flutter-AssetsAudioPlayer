@@ -622,11 +622,11 @@ class AssetsAudioPlayer {
               if (_playlist != null) {
                 final current = Playing(
                   audio: playingAudio,
-                  index: _playlist!.playlistIndex,
+                  index: _playlist!.indexList[_playlist!.playlistIndex],
                   hasNext: _playlist!.hasNext(),
                   playlist: ReadingPlaylist(
                       audios: _playlist!.playlist.audios,
-                      currentIndex: _playlist!.playlistIndex,
+                      currentIndex: _playlist!.indexList[_playlist!.playlistIndex],
                       nextIndex: _playlist!.nextIndex(),
                       previousIndex: _playlist!.previousIndex()),
                 );
