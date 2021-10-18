@@ -335,7 +335,7 @@ class NotificationService : Service() {
     }
 
     override fun onTaskRemoved(rootIntent: Intent) {
-        hideNotif()
+        //hideNotif()
     }
 
     override fun onCreate() {
