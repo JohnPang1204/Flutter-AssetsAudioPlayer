@@ -124,7 +124,7 @@ class NotificationService : Service() {
                 hideNotif()
             }
         }
-        return START_NOT_STICKY
+        return START_STICKY
     }
 
     private fun createReturnIntent(forAction: String, forPlayer: String, audioMetas: AudioMetas): Intent {
@@ -335,7 +335,7 @@ class NotificationService : Service() {
     }
 
     override fun onTaskRemoved(rootIntent: Intent) {
-        //hideNotif()
+        hideNotif()
     }
 
     override fun onCreate() {
