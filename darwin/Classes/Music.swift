@@ -114,6 +114,11 @@ public class Player : NSObject, AVAudioPlayerDelegate {
     
     var _loopSingleAudio = false
     var isLiveStream: Bool = false
+    var isDefaultAudioConfigurationEnabled: Bool = true
+    
+    var secondaryPlayer: AVQueuePlayer?
+    let crossFadetimeInSeconds: Double = 5.0
+    var isAlreadyCrossFading: Bool = false
     
     init(channel: FlutterMethodChannel, registrar: FlutterPluginRegistrar) {
         self.channel = channel
@@ -273,17 +278,20 @@ public class Player : NSObject, AVAudioPlayerDelegate {
         
         //https://stackoverflow.com/questions/34563451/set-mpnowplayinginfocenter-with-other-background-audio-playing
         //This isn't currently possible in iOS. Even just changing your category options to .MixWithOthers causes your nowPlayingInfo to be ignored.
-        do {
-            if #available(iOS 10.0, *) {
-                try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [])
-                try AVAudioSession.sharedInstance().setActive(true)
-            } else {
-                try AVAudioSession.sharedInstance().setCategory(.playback, options: [])
-                try AVAudioSession.sharedInstance().setActive(true)
+        if(isDefaultAudioConfigurationEnabled) {
+            do {
+                if #available(iOS 10.0, *) {
+                    try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [])
+                    try AVAudioSession.sharedInstance().setActive(true)
+                } else {
+                    try AVAudioSession.sharedInstance().setCategory(.playback, options: [])
+                    try AVAudioSession.sharedInstance().setActive(true)
+                }
+            } catch let error {
+                print(error)
             }
-        } catch let error {
-            print(error)
         }
+        UIApplication.shared.beginReceivingRemoteControlEvents()
     }
     
     func deinitMediaPlayerNotifEvent() {
@@ -481,6 +489,9 @@ public class Player : NSObject, AVAudioPlayerDelegate {
     
     var currentSongDurationMs : Float64 = Float64(0.0)
     
+    var isCrossFadeEnabled : Bool = false
+
+    
     func open(assetPath: String,
               assetPackage: String?,
               audioType: String,
@@ -494,10 +505,19 @@ public class Player : NSObject, AVAudioPlayerDelegate {
               audioFocusStrategy: AudioFocusStrategy,
               playSpeed: Double,
               networkHeaders: NSDictionary?,
+              isCrossFadeEnabled: Bool,
               result: @escaping FlutterResult
     ){
-        self.stop()
+        self.isCrossFadeEnabled = isCrossFadeEnabled
+
+             if(!isCrossFadeEnabled) {
+                 self.stop()
+             }
+
         guard let url = self.getUrlByType(path: assetPath, audioType: audioType, assetPackage: assetPackage) else {
+            self.setBuffering(false)
+            self.onError(AssetAudioPlayerError(type: "PLAY_ERROR", message: "resource not found \(assetPath)"))
+            
             log("resource not found \(assetPath)")
             result("")
             return
@@ -514,6 +534,8 @@ public class Player : NSObject, AVAudioPlayerDelegate {
             print("displayNotification " + displayNotification.description)
             print("url: " + url.absoluteString)
             
+            print("Music isDefaultAudioConfigurationEnabled - \(isDefaultAudioConfigurationEnabled)")
+            if(self.isDefaultAudioConfigurationEnabled) {
             /* set session category and mode with options */
             if #available(iOS 10.0, *) {
                 //try AVAudioSession.sharedInstance().setCategory(category, mode: mode, options: [.mixWithOthers])
@@ -524,6 +546,7 @@ public class Player : NSObject, AVAudioPlayerDelegate {
                 try AVAudioSession.sharedInstance().setCategory(category)
                 try AVAudioSession.sharedInstance().setActive(true)
                 
+             }
             }
             #endif
             
@@ -567,6 +590,14 @@ public class Player : NSObject, AVAudioPlayerDelegate {
             
             self.setBuffering(true)
             self.isLiveStream = false
+            
+            var isObservingCurrentItem = false
+
+             if isObservingCurrentItem {
+                observerStatus.removeAll()
+             }
+
+            
             observerStatus.append( item.observe(\.status, changeHandler: { [weak self] (item, value) in
                 
                 switch item.status {
@@ -591,6 +622,22 @@ public class Player : NSObject, AVAudioPlayerDelegate {
                         #endif
                     }
                     
+                    let audioDurationMs = self?.getMillisecondsFromCMTime(item.duration) ?? 0
+                    if audioDurationMs == 0 {
+                        debugPrint("playback failed")
+                                       
+                        self?.onError(AssetAudioPlayerError(type: "PLAY_ERROR", message: "playback failed duration is 0"))
+                        return
+                    }
+                                   
+                    if(isCrossFadeEnabled && self?.secondaryPlayer != nil) {
+                        self?.setFadeInOrOut(isStartingSong: true, previousVolume: Float(volume), startTime: CMTime.zero)
+                    } else {
+                        self?.setVolume(volume: volume)
+                    }
+
+                    
+                    
                     self?.setPlaySpeed(playSpeed: playSpeed)
                     
                     if(autoStart == true){
@@ -608,6 +655,16 @@ public class Player : NSObject, AVAudioPlayerDelegate {
                     //self?.setBuffering(false)
                     
                     self?.addPostPlayingBufferListeners(item: item)
+                    
+                    self?.setBuffering(false)
+
+                    if(isObservingCurrentItem) {
+                        if((self?.observerStatus.count ?? -1) > 0){
+                                                        self?.observerStatus.removeAll()
+                                    }
+                            }
+
+                    isObservingCurrentItem = false
                     self?.addPlayerStatusListeners(item: (self?.player)!);
                     
                     result(nil)
@@ -615,7 +672,8 @@ public class Player : NSObject, AVAudioPlayerDelegate {
                     debugPrint("playback failed")
                     
                     self?.stop()
-                    
+                    self?.setBuffering(false)
+
                     result(FlutterError(
                         code: "PLAY_ERROR",
                         message: "Cannot play "+assetPath,
@@ -626,7 +684,8 @@ public class Player : NSObject, AVAudioPlayerDelegate {
                 }
             }))
             
-            
+            isObservingCurrentItem = true
+
             
             if(self.player == nil){
                 //log("player is null")
@@ -739,6 +798,7 @@ public class Player : NSObject, AVAudioPlayerDelegate {
         case .began:
             // An interruption began. Update the UI as needed.
             pause()
+            print("handleInterruption :- Interruption starts. Status pause")
             
         case .ended:
             // An interruption ended. Resume playback, if appropriate.
@@ -752,6 +812,8 @@ public class Player : NSObject, AVAudioPlayerDelegate {
                 // Interruption ended. Playback should resume.
             } else {
                 // Interruption ended. Playback should not resume.
+                self.pause()
+                print("handleInterruption :- Interruption ended. Playback should not resume")
             }
             
         default: ()
@@ -833,9 +895,17 @@ public class Player : NSObject, AVAudioPlayerDelegate {
     func play(){
         if #available(iOS 10.0, *) {
             self.player?.playImmediately(atRate: self.rate)
+            if(isCrossFadeEnabled) {
+                        self.secondaryPlayer?.playImmediately(atRate: self.rate)
+            }
         } else {
             self.player?.play()
             self.player?.rate = self.rate
+            
+            if(isCrossFadeEnabled) {
+                      self.secondaryPlayer?.play()
+                      self.secondaryPlayer?.rate = self.rate
+            }
         }
         self.currentTimeTimer = Timer.scheduledTimer(timeInterval: 0.3, target: self, selector: #selector(updateTimer), userInfo: nil, repeats: true)
         self.currentTimeTimer?.fire()
@@ -903,8 +973,52 @@ public class Player : NSObject, AVAudioPlayerDelegate {
                     MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
                     #endif
                 }
+                
+                if(isCrossFadeEnabled  && (_currentTime + (crossFadetimeInSeconds * 1000)) >= self.currentSongDurationMs && !isAlreadyCrossFading) {
+                  self.handleCrossfading()
+                  }
             }
         }
+    }
+    
+    func handleCrossfading() {
+        isAlreadyCrossFading = true
+        self.secondaryPlayer =  self.player
+        
+        self.channel.invokeMethod(Music.METHOD_FINISHED, arguments: true)
+
+        let targetTime: CMTime = CMTimeMakeWithSeconds(Double(_currentTime) / 1000.0, preferredTimescale: 1)
+        self.setFadeInOrOut(isStartingSong: false, previousVolume:  self.secondaryPlayer?.volume ?? 1, startTime: targetTime)
+    }
+    
+    func setFadeInOrOut(isStartingSong: Bool, previousVolume:Float, startTime : CMTime) {
+           //print("isStartingSong \(isStartingSong)")
+           if(!isCrossFadeEnabled) {
+              return
+           }
+        
+           let duration = CMTimeMakeWithSeconds(crossFadetimeInSeconds, preferredTimescale: 1)
+           let songRangeInSeconds = CMTimeRangeMake(start: startTime, duration: duration)
+        
+           if(isStartingSong) {
+                if let item = self.player?.currentItem, let track = item.asset.tracks.first {
+                    let param = AVMutableAudioMixInputParameters(track:track)
+                    param.setVolumeRamp(fromStartVolume: 0, toEndVolume: previousVolume, timeRange: songRangeInSeconds)
+
+                     let mix = AVMutableAudioMix()
+                     mix.inputParameters = [param]
+                     self.player?.currentItem?.audioMix = mix
+               }
+            } else {
+                if let item = self.secondaryPlayer?.currentItem, let track = item.asset.tracks.first {
+
+                     let param = AVMutableAudioMixInputParameters(track:track)
+                     param.setVolumeRamp(fromStartVolume: previousVolume, toEndVolume: 0, timeRange: songRangeInSeconds)
+                     let mix = AVMutableAudioMix()
+                     mix.inputParameters = [param]
+                     self.secondaryPlayer?.currentItem?.audioMix = mix
+               }
+            }
     }
     
     func updateCurrentTime(time: CMTime){
@@ -925,6 +1039,13 @@ public class Player : NSObject, AVAudioPlayerDelegate {
     var currentTimeTimer: Timer?
     
     @objc public func playerDidFinishPlaying(note: NSNotification){
+        
+        if(isCrossFadeEnabled) {
+               self.isAlreadyCrossFading = false
+               self.secondaryPlayer = nil
+               return
+           }
+        
         if(self._loopSingleAudio){
             self.player?.seek(to: CMTime.zero)
             self.player?.play()
@@ -940,6 +1061,11 @@ public class Player : NSObject, AVAudioPlayerDelegate {
         self.observerStatus.forEach {
             $0.invalidate()
         }
+        
+        NotificationCenter.default.removeObserver(self,
+                                                  name: Notification.Name("AVSystemController_SystemVolumeDidChangeNotification"),
+                                                  object: nil)
+        
         self.observerStatus.removeAll()
         #if os(iOS)
         self.deinitMediaPlayerNotifEvent()
@@ -957,6 +1083,9 @@ public class Player : NSObject, AVAudioPlayerDelegate {
         
 //        self.playing = false
         self.currentTimeTimer?.invalidate()
+        if(isCrossFadeEnabled) {
+              self.secondaryPlayer?.pause()
+          }
     }
     
     @objc func updateTimer(){
@@ -1363,6 +1492,67 @@ class Music : NSObject, FlutterPlugin {
                 
                 self.getOrCreatePlayer(id: id).onAudioUpdated(path: path, audioMetas: audioMetas)
                 result(true)
+            case "cross_fade" :
+                guard let args = call.arguments as? NSDictionary else {
+                    result(FlutterError(
+                        code: "METHOD_CALL",
+                        message: call.method + " Arguments must be an NSDictionary",
+                        details: nil)
+                    )
+                    break
+                }
+
+                guard let isCrossfade = args["cross_fade"] as? Bool else {
+                    result(FlutterError(
+                        code: "METHOD_CALL",
+                        message: call.method + " Arguments[id] must be a String",
+                        details: nil)
+                    )
+                    break
+                }
+                
+                guard let id = args["id"] as? String else {
+                    result(FlutterError(
+                        code: "METHOD_CALL",
+                        message: call.method + " Arguments[id] must be a String",
+                        details: nil)
+                    )
+                    break
+                }
+                self.getOrCreatePlayer(id: id).isCrossFadeEnabled = isCrossfade
+            break
+                
+            case "enableIOSDefaultAudioSessionConfiguration" :
+                guard let args = call.arguments as? NSDictionary else {
+                    result(FlutterError(
+                            code: "METHOD_CALL",
+                            message: call.method + " Arguments must be an NSDictionary",
+                            details: nil)
+                    )
+                    break
+                }
+                
+                guard let isEnabled = args["isEnabled"] as? Bool else {
+                    result(FlutterError(
+                            code: "METHOD_CALL",
+                            message: call.method + " Arguments[path] must be a Bool",
+                            details: nil)
+                    )
+                    break
+                }
+                
+                guard let id = args["id"] as? String else {
+                    result(FlutterError(
+                            code: "METHOD_CALL",
+                            message: call.method + " Arguments[id] must be a String",
+                            details: nil)
+                    )
+                    break
+                }
+                
+                
+                self.getOrCreatePlayer(id: id).isDefaultAudioConfigurationEnabled = isEnabled
+            break
                 
             case "open" :
                 guard let args = call.arguments as? NSDictionary else {
@@ -1426,6 +1616,15 @@ class Music : NSObject, FlutterPlugin {
                     break
                 }
                 
+                guard let isCrossfade = args["cross_fade"] as? Bool else {
+                            result(FlutterError(
+                                code: "METHOD_CALL",
+                                message: call.method + " Arguments[id] must be a String",
+                                details: nil)
+                            )
+                            break
+                   }
+                
                 let networkHeaders = args["networkHeaders"] as? NSDictionary
                 
                 let respectSilentMode = args["respectSilentMode"] as? Bool ?? false
@@ -1452,6 +1651,7 @@ class Music : NSObject, FlutterPlugin {
                         audioFocusStrategy: audioFocusStrategy,
                         playSpeed: playSpeed,
                         networkHeaders: networkHeaders,
+                        isCrossFadeEnabled: isCrossfade,
                         result: result
                 )
                 

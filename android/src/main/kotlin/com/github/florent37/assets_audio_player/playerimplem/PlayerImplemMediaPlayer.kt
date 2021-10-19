@@ -96,7 +96,7 @@ class PlayerImplemMediaPlayer(
             mediaPlayer?.isLooping = value
         }
 
-    override fun stop() {
+    override fun stop(crossFade:Boolean) {
         mediaPlayer?.stop()
     }
 

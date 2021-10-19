@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:assets_audio_player/assets_audio_player.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
 import 'utils.dart';
@@ -101,17 +102,27 @@ class Metas {
   final String? title;
   final String? artist;
   final String? album;
+  final String? artistId;
+  final String? albumId;
+  final String? hexColor;
+  final String? languageId;
   final Map<String, dynamic>? extra;
   final MetasImage? image;
   final MetasImage? onImageLoadFail;
+  final Duration? duration;
 
   Metas({
+    this.hexColor,
+    this.languageId,
     this.id,
     this.title,
     this.artist,
+    this.artistId,
     this.album,
+    this.albumId,
     this.image,
     this.extra,
+    this.duration,
     this.onImageLoadFail,
   }) {
     id ??= Uuid().v4();
@@ -123,8 +134,12 @@ class Metas {
       other is Metas &&
           runtimeType == other.runtimeType &&
           title == other.title &&
+          id == other.id &&
           artist == other.artist &&
           album == other.album &&
+          album == other.albumId &&
+          album == other.artistId &&
+          duration == other.duration &&
           image == other.image &&
           onImageLoadFail == onImageLoadFail;
 
@@ -133,7 +148,10 @@ class Metas {
       title.hashCode ^
       artist.hashCode ^
       album.hashCode ^
+      artistId.hashCode ^
+      albumId.hashCode ^
       image.hashCode ^
+      duration.hashCode ^
       onImageLoadFail.hashCode;
 
   Metas copyWith({
@@ -141,6 +159,9 @@ class Metas {
     String? title,
     String? artist,
     String? album,
+    String? artistId,
+    String? albumId,
+    Duration? duration,
     Map<String, dynamic>? extra,
     MetasImage? image,
     MetasImage? onImageLoadFail,
@@ -149,7 +170,10 @@ class Metas {
       id: id ?? this.id,
       title: title ?? this.title,
       artist: artist ?? this.artist,
+      artistId: artistId ?? this.artistId,
       album: album ?? this.album,
+      albumId: albumId ?? this.albumId,
+      duration: duration ?? this.duration,
       extra: extra ?? this.extra,
       image: image ?? this.image,
       onImageLoadFail: onImageLoadFail ?? this.onImageLoadFail,
@@ -393,12 +417,12 @@ class Playlist extends Playable {
     return this;
   }
 
-  Playlist insert(int index, Audio audio) {
+  Playlist insert(int index, Audio audio, {bool reOrdering = false}) {
     if (index >= 0) {
       if (index < audios.length) {
         audios.insert(index, audio);
         super.currentlyOpenedIn.forEach((playerEditor) {
-          playerEditor.onAudioAddedAt(index);
+          playerEditor.onAudioAddedAt(index,reOrdering: reOrdering);
         });
       } else {
         return add(audio);
@@ -435,10 +459,10 @@ class Playlist extends Playable {
     return removed;
   }
 
-  Audio removeAtIndex(int index) {
+  Audio removeAtIndex(int index, {bool reOrdering = false}) {
     final removedAudio = audios.removeAt(index);
     super.currentlyOpenedIn.forEach((playerEditor) {
-      playerEditor.onAudioRemovedAt(index);
+      playerEditor.onAudioRemovedAt(index, reOrdering: reOrdering);
     });
     return removedAudio;
   }

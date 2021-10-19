@@ -472,6 +472,16 @@ class AssetsAudioPlayer(
                     return
                 }
             }
+            "cross_fade" -> {
+                (call.arguments as? Map<*, *>)?.let { args ->
+                    val id = args["id"] as? String ?: run {
+                        result.error("WRONG_FORMAT", "The specified argument (id) must be an String.", null)
+                        return
+                    }
+                    val crossFade = args["cross_fade"] as? Boolean ?: false
+                    getOrCreatePlayer(id).stop(pingListener = false,crossFade = crossFade)
+                }
+            }
             "open" -> {
                 (call.arguments as? Map<*, *>)?.let { args ->
 
@@ -525,6 +535,7 @@ class AssetsAudioPlayer(
 
                     val audioFocusStrategy = AudioFocusStrategy.from(args["audioFocusStrategy"] as? Map<*, *>)
                     val headsetStrategy = HeadsetStrategy.from(args["headPhoneStrategy"] as? String)
+                    val crossFade = args["cross_fade"] as? Boolean ?: false
 
                     getOrCreatePlayer(id).open(
                             assetAudioPath = path,
@@ -544,7 +555,8 @@ class AssetsAudioPlayer(
                             audioFocusStrategy = audioFocusStrategy,
                             networkHeaders = networkHeaders,
                             context = context,
-                            drmConfiguration = drmConfiguration
+                            drmConfiguration = drmConfiguration,
+                            crossFadeValue = crossFade
                     )
                 } ?: run {
                     result.error("WRONG_FORMAT", "The specified argument must be an Map<*, Any>.", null)

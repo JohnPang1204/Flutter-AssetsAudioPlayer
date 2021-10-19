@@ -3,8 +3,8 @@ package com.github.florent37.assets_audio_player.playerimplem
 import android.content.Context
 import android.net.Uri
 import android.os.Build
+import android.os.Handler
 import android.util.Log
-import androidx.annotation.RequiresApi
 import com.github.florent37.assets_audio_player.AssetAudioPlayerThrowable
 import com.github.florent37.assets_audio_player.AssetsAudioPlayerPlugin
 import com.github.florent37.assets_audio_player.Player
@@ -101,29 +101,77 @@ class PlayerImplemExoPlayer(
         onError = onError
 ) {
 
-    private var mediaPlayer: ExoPlayer? = null
+    private var currentMediaPlayer: ExoPlayer? = null
+    private var previousMediaPlayer: ExoPlayer? = null
+    private var volume = 1f
+    private var isFadingOut:Boolean = false
+    private val fadeHandler:Handler = Handler()
+    private var updater: Runnable = Runnable {
+        run {
+            fadeOutStep(0.05F)
+            fadeHandler?.postDelayed(updater,250);
+            if (volume <= 0f) {
+                cancelFadingOut()
+                fadeHandler?.removeCallbacks(updater);
+            }
+        }
+    }
+
 
     override var loopSingleAudio: Boolean
-        get() = mediaPlayer?.repeatMode == REPEAT_MODE_ALL
+        get() = currentMediaPlayer?.repeatMode == REPEAT_MODE_ALL
         set(value) {
-            mediaPlayer?.repeatMode = if (value) REPEAT_MODE_ALL else REPEAT_MODE_OFF
+            currentMediaPlayer?.repeatMode = if (value) REPEAT_MODE_ALL else REPEAT_MODE_OFF
         }
 
     override val isPlaying: Boolean
-        get() = mediaPlayer?.isPlaying ?: false
+        get() = currentMediaPlayer?.isPlaying ?: false
     override val currentPositionMs: Long
-        get() = mediaPlayer?.currentPosition ?: 0
+        get() = currentMediaPlayer?.currentPosition ?: 0
 
-    override fun stop() {
-        mediaPlayer?.stop()
+    private fun fadeOutStep(deltaVolume: Float) {
+        previousMediaPlayer?.audioComponent?.volume = volume
+        volume -= deltaVolume
+    }
+
+    private fun cancelFadingOut(){
+        previousMediaPlayer?.stop()
+        previousMediaPlayer?.release()
+        previousMediaPlayer = null
+        fadeHandler?.removeCallbacks(updater);
+        isFadingOut = false
+    }
+
+
+    override fun stop(crossFade:Boolean) {
+        if(currentMediaPlayer == null){
+            return
+        }
+        if(isFadingOut){
+            cancelFadingOut()
+        }
+        previousMediaPlayer = currentMediaPlayer
+        currentMediaPlayer = null
+        if(crossFade){
+            volume = 1f
+            isFadingOut = true
+            fadeHandler?.post(updater)
+        } else {
+            previousMediaPlayer?.stop()
+            previousMediaPlayer?.release()
+            previousMediaPlayer = null
+        }
     }
 
     override fun play() {
-        mediaPlayer?.playWhenReady = true
+        currentMediaPlayer?.playWhenReady = true
     }
 
     override fun pause() {
-        mediaPlayer?.playWhenReady = false
+        if(isFadingOut){
+            cancelFadingOut()
+        }
+        currentMediaPlayer?.playWhenReady = false
     }
 
     private fun getDataSource(context: Context,
@@ -135,7 +183,7 @@ class PlayerImplemExoPlayer(
                       drmConfiguration: Map<*, *>?
     ): MediaSource {
         try {
-            mediaPlayer?.stop()
+            currentMediaPlayer?.stop()
             if (audioType == Player.AUDIO_TYPE_NETWORK || audioType == Player.AUDIO_TYPE_LIVESTREAM) {
                 val uri = Uri.parse(assetAudioPath)
                 val userAgent = "assets_audio_player"
@@ -247,7 +295,13 @@ class PlayerImplemExoPlayer(
         var onThisMediaReady = false
 
         try {
-            mediaPlayer = SimpleExoPlayer.Builder(context)
+            if(currentMediaPlayer != null){
+                currentMediaPlayer?.release()
+                currentMediaPlayer = null
+                cancelFadingOut()
+            }
+
+            currentMediaPlayer = SimpleExoPlayer.Builder(context)
                     .incrementBufferSize(audioType)
                     .build()
 
@@ -263,7 +317,7 @@ class PlayerImplemExoPlayer(
 
             var lastState: Int? = null
 
-            this.mediaPlayer?.addListener(object : com.google.android.exoplayer2.Player.EventListener {
+            this.currentMediaPlayer?.addListener(object : com.google.android.exoplayer2.Player.EventListener {
 
                 override fun onPlayerError(error: ExoPlaybackException) {
                     val errorMapped = mapError(error)
@@ -293,7 +347,7 @@ class PlayerImplemExoPlayer(
                                     if (audioType == Player.AUDIO_TYPE_LIVESTREAM) {
                                         continuation.resume(0) //no duration for livestream
                                     } else {
-                                        val duration = mediaPlayer?.duration ?: 0
+                                        val duration = currentMediaPlayer?.duration ?: 0
                                         val totalDurationMs = (duration.toLong())
 
                                         continuation.resume(totalDurationMs)
@@ -308,7 +362,7 @@ class PlayerImplemExoPlayer(
                 }
             })
 
-            mediaPlayer?.prepare(mediaSource)
+            currentMediaPlayer?.prepare(mediaSource)
         } catch (error: Throwable) {
             if (!onThisMediaReady) {
                 continuation.resumeWithException(error)
@@ -320,43 +374,43 @@ class PlayerImplemExoPlayer(
     }
 
     override fun release() {
-        mediaPlayer?.release()
+        currentMediaPlayer?.release()
     }
 
     override fun seekTo(to: Long) {
-        mediaPlayer?.seekTo(to)
+        currentMediaPlayer?.seekTo(to)
     }
 
     override fun setVolume(volume: Float) {
-        mediaPlayer?.audioComponent?.volume = volume
+        currentMediaPlayer?.audioComponent?.volume = volume
     }
 
     override fun setPlaySpeed(playSpeed: Float) {
-        val params: PlaybackParameters? = mediaPlayer?.getPlaybackParameters()
+        val params: PlaybackParameters? = currentMediaPlayer?.getPlaybackParameters()
         if (params != null) {
-            mediaPlayer?.setPlaybackParameters(PlaybackParameters(playSpeed, params.pitch))
+            currentMediaPlayer?.setPlaybackParameters(PlaybackParameters(playSpeed, params.pitch))
         }
     }
 
     override fun setPitch(pitch: Float) {
-        val params: PlaybackParameters? = mediaPlayer?.getPlaybackParameters()
+        val params: PlaybackParameters? = currentMediaPlayer?.getPlaybackParameters()
         if (params != null) {
-            mediaPlayer?.setPlaybackParameters(PlaybackParameters(params.speed, pitch))
+            currentMediaPlayer?.setPlaybackParameters(PlaybackParameters(params.speed, pitch))
         }
     }
 
     override fun getSessionId(listener: (Int) -> Unit) {
-        val id = mediaPlayer?.audioComponent?.audioSessionId?.takeIf { it != AUDIO_SESSION_ID_UNSET }
+        val id = currentMediaPlayer?.audioComponent?.audioSessionId?.takeIf { it != AUDIO_SESSION_ID_UNSET }
         if (id != null) {
             listener(id)
         } else {
             val listener = object : AudioListener {
                 override fun onAudioSessionIdChanged(audioSessionId: Int) {
                     listener(audioSessionId)
-                    mediaPlayer?.audioComponent?.removeAudioListener(this)
+                    currentMediaPlayer?.audioComponent?.removeAudioListener(this)
                 }
             }
-            mediaPlayer?.audioComponent?.addAudioListener(listener)
+            currentMediaPlayer?.audioComponent?.addAudioListener(listener)
         }
         //return
     }

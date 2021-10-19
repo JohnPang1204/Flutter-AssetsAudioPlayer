@@ -23,6 +23,11 @@ class StopWhenCallAudioFocus(private val context: Context) : StopWhenCall() {
                 synchronized(focusLock) {
                     pingListeners(AudioState.REDUCE_VOLUME)
                 }
+            AudioManager.AUDIOFOCUS_LOSS -> {
+                synchronized(focusLock) {
+                    pingListeners(AudioState.FORBIDDEN)
+                }
+            }
             else -> {
                 synchronized(focusLock) {
                     pingListeners(AudioState.FORBIDDEN)
@@ -63,6 +68,7 @@ class StopWhenCallAudioFocus(private val context: Context) : StopWhenCall() {
         return when(result){
             AudioManager.AUDIOFOCUS_GAIN, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT -> AudioState.AUTHORIZED_TO_PLAY
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> AudioState.REDUCE_VOLUME
+            AudioManager.AUDIOFOCUS_LOSS -> AudioState.FORBIDDEN
             else -> AudioState.FORBIDDEN
         }
     }
